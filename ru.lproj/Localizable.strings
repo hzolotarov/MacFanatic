@@ -1,0 +1,50 @@
+/* SMC Fan Control — русская локализация */
+
+/* Вентиляторы */
+"Left side" = "Левый";
+"Right side" = "Правый";
+"Fan %d" = "Вентилятор %d";
+"Auto" = "Авто";
+"Custom…" = "Настроить…";
+"by %@" = "по %@";
+"All fans to auto" = "Всё в авто";
+
+/* Попап настройки */
+"Fan control: %@" = "Управление: %@";
+"Automatic (SMC)" = "Автоматически (SMC)";
+"Constant RPM" = "Постоянные обороты";
+"Sensor-based" = "По датчику";
+"Sensor:" = "Датчик:";
+"from" = "от";
+"°C — min RPM, to" = "°C — min RPM,  до";
+"°C — max RPM" = "°C — max RPM";
+"RPM interpolates linearly between %@ and %@ RPM." = "Обороты интерполируются линейно между %@ и %@ RPM.";
+"Cancel" = "Отмена";
+"Apply" = "Применить";
+
+/* Таблица сенсоров */
+"Sensor" = "Сенсор";
+"(raw key)" = "(сырой ключ)";
+"Hide raw keys" = "Скрыть сырые ключи";
+"Click to toggle this sensor on the graph" = "Клик — показать/убрать на графике";
+
+/* График */
+"Click a sensor in the table on the right to plot it" = "Кликни по сенсору в таблице справа — он появится на графике";
+"Collecting data…" = "Копятся данные…";
+"1 min" = "1 мин";
+"5 min" = "5 мин";
+"15 min" = "15 мин";
+"1 h" = "1 час";
+"2 h" = "2 часа";
+
+/* Helper и ошибки */
+"Grant helper privileges…" = "Выдать права helper'у…";
+"Helper smcfan-cli not found (rebuild: make app)." = "Не найден helper smcfan-cli (пересобери: make app).";
+"Failed to launch helper: %@" = "Не удалось запустить helper: %@";
+"Helper failed.\n%@\nMost likely missing privileges — press “Grant helper privileges”." = "Helper завершился с ошибкой.\n%@\nСкорее всего, не хватает прав — нажми «Выдать права helper'у».";
+"Helper not found next to the app." = "Не найден helper рядом с приложением.";
+"Failed to grant privileges: %@" = "Не удалось выдать права: %@";
+
+/* Menu bar */
+"Show window" = "Показать окно";
+"Quit" = "Выход";

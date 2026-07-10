@@ -1,5 +1,6 @@
 # Mac Fanatic
 
+![Icon](icon.png)
 Fan control for Intel Macs with a PD control loop, throttle guard, and
 Power Gadget-style live graphs. Born as a Macs Fan Control clone, ended up
 doing a few things the original doesn't.
@@ -37,6 +38,8 @@ doing a few things the original doesn't.
   language is one `.strings` file, zero code changes. In-app language picker.
 - Rules persist across launches; on quit the app hands fans back to SMC
   automatics without touching saved rules.
+
+![Main Window](MainWindow.png)
 
 ## Architecture
 

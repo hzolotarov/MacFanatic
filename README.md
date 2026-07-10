@@ -5,7 +5,8 @@
 
 Fan control for Intel Macs with a PD control loop, throttle guard, and
 Power Gadget-style live graphs. Born as a Macs Fan Control clone, ended up
-doing a few things the original doesn't.
+doing a few things the original doesn't. Built using an AI-assisted vibe coding 
+workflow with Claude.
 
 ![macOS 12+](https://img.shields.io/badge/macOS-12%2B-blue) ![Intel only](https://img.shields.io/badge/arch-Intel-lightgrey)
 

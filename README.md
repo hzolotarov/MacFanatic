@@ -55,9 +55,31 @@ The setuid helper is a deliberate trade-off: any local user can spin your
 fans. Fine for a personal machine; if that bothers you, skip `make helper`
 and drive the CLI with `sudo` yourself.
 
-## Build
+## Requirements
 
-Requires Xcode Command Line Tools (`xcode-select --install`), macOS 12+.
+- Intel Mac, macOS 12+
+- Xcode Command Line Tools (`xcode-select --install`) — build only
+- **[Intel Power Gadget](https://www.intel.com/content/www/us/en/developer/articles/tool/power-gadget.html)** — *optional but strongly recommended.*
+  Core frequency and per-rail power (RAPL) live in MSRs, which are not
+  readable from userspace; Power Gadget ships the kext that exposes them,
+  and Mac Fanatic loads its framework at runtime via `dlopen`
+  (`/Library/Frameworks/IntelPowerGadget.framework`). No SDK or linking
+  involved — just install the app.
+
+| Feature                          | Without Power Gadget | With Power Gadget |
+|----------------------------------|----------------------|-------------------|
+| Fan control (all modes)          | ✅                   | ✅                |
+| Temperatures, RPM, utilization   | ✅                   | ✅                |
+| Power graph (PKG/CORE)           | ✅ via SMC fallback  | ✅ RAPL           |
+| Power graph (DRAM)               | ❌                   | ✅                |
+| Frequency graph                  | ❌ (hidden)          | ✅                |
+| **Throttle guard**               | ❌ (needs frequency) | ✅                |
+
+The throttle guard is the headline feature for 2018 i9 owners — it detects
+VRM/BD PROCHOT throttling by watching frequency, which no temperature
+sensor can see. Without Power Gadget it is silently unavailable.
+
+## Build
 
 ```bash
 make app                     # builds the CLI, the GUI, and MacFanatic.app
@@ -65,10 +87,6 @@ make helper                  # one-time: setuid for the helper (asks for sudo)
 make icon SRC=your-icon.png  # optional: generate AppIcon.icns (before make app)
 open MacFanatic.app
 ```
-
-For power and frequency graphs (and the throttle guard), install
-[Intel Power Gadget](https://www.intel.com/content/www/us/en/developer/articles/tool/power-gadget.html).
-Everything else works without it.
 
 ## Adding a language
 
@@ -88,3 +106,4 @@ The language picker discovers `*.lproj` folders automatically.
 - RPM is clamped to the SMC-reported min/max per fan; you can't set values
   outside the hardware envelope.
 - Apple Silicon is not supported (different SMC keys and write path).
+

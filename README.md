@@ -84,7 +84,7 @@ sensor can see. Without Power Gadget it is silently unavailable.
 ```bash
 make app                     # builds the CLI, the GUI, and MacFanatic.app
 make helper                  # one-time: setuid for the helper (asks for sudo)
-make icon SRC=your-icon.png  # optional: generate AppIcon.icns (before make app)
+make icon SRC=icon.png  # optional: generate AppIcon.icns (before make app)
 open MacFanatic.app
 ```
 

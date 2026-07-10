@@ -1,0 +1,73 @@
+/* Mac Fanatic — русская локализация */
+
+/* Вентиляторы */
+"Left side" = "Левый";
+"Right side" = "Правый";
+"Fan %d" = "Вентилятор %d";
+"Auto" = "Авто";
+"Custom…" = "Настроить…";
+"by %@" = "по %@";
+"All fans to auto" = "Всё в авто";
+"Full Blast" = "Турбина";
+
+/* Попап настройки */
+"Fan control: %@" = "Управление: %@";
+"Automatic (SMC)" = "Автоматически (SMC)";
+"Constant RPM" = "Постоянные обороты";
+"Sensor-based" = "По датчику";
+"Sensor:" = "Датчик:";
+"from" = "от";
+"°C — min RPM, to" = "°C — min RPM,  до";
+"°C — max RPM" = "°C — max RPM";
+"RPM interpolates linearly between %@ and %@ RPM." = "Обороты интерполируются линейно между %@ и %@ RPM.";
+"Spike boost" = "Резкость на рост";
+"Extra RPM per 1 °C/s of temperature rise. 0 = off." = "Добавка оборотов на каждый 1 °C/с роста температуры. 0 = выкл.";
+"Release speed" = "Отпускание";
+"How fast RPM may fall, per second. Lower = holds longer. Shared by all sensor rules." = "Скорость снижения оборотов в секунду. Меньше = держит дольше. Общее для всех правил по датчику.";
+"How fast RPM may fall, per second. Lower = holds longer." = "Скорость снижения оборотов в секунду. Меньше = держит дольше.";
+"Reaction…" = "Реакция…";
+"Reaction settings" = "Настройки реакции";
+"Shared by all sensor-based rules." = "Общие для всех правил по датчику.";
+"Throttle guard" = "Защита от тротлинга";
+"Throttled below" = "Тротлинг ниже";
+"If core frequency drops below this while the CPU is busy, sensor-based fans go to maximum until it recovers. Catches VRM/BD PROCHOT throttling that temperature rules can't see." = "Если при занятом CPU частота падает ниже порога — вентиляторы правил «по датчику» уходят в максимум, пока частота не восстановится. Ловит тротлинг VRM/BD PROCHOT, который температурным правилам не виден.";
+"Throttle guard needs Intel Power Gadget for frequency data." = "Защите от тротлинга нужен Intel Power Gadget (данные о частоте).";
+"THROTTLE" = "ТРОТЛИНГ";
+"off" = "выкл";
+"Language" = "Язык";
+"Power" = "Мощность";
+"Frequency" = "Частота";
+"Utilization" = "Загрузка";
+"Total" = "Общая";
+"Per core" = "По ядрам";
+"Cancel" = "Отмена";
+"Apply" = "Применить";
+
+/* Таблица сенсоров */
+"Sensor" = "Сенсор";
+"Sort by name" = "Сортировать по имени";
+"Sort by temperature" = "Сортировать по температуре";
+"(raw key)" = "(сырой ключ)";
+"Hide raw keys" = "Скрыть сырые ключи";
+"Click to toggle this sensor on the graph" = "Клик — показать/убрать на графике";
+
+/* График */
+"Click a sensor in the table on the right to plot it" = "Кликни по сенсору в таблице справа — он появится на графике";
+"Collecting data…" = "Копятся данные…";
+"1 min" = "1 мин";
+"5 min" = "5 мин";
+"15 min" = "15 мин";
+"1 h" = "1 час";
+"2 h" = "2 часа";
+
+/* Helper и ошибки */
+"Grant helper privileges…" = "Выдать права helper'у…";
+"Helper smcfan-cli not found (rebuild: make app)." = "Не найден helper smcfan-cli (пересобери: make app).";
+"Failed to launch helper: %@" = "Не удалось запустить helper: %@";
+"Helper failed.\n%@\nMost likely missing privileges — press “Grant helper privileges”." = "Helper завершился с ошибкой.\n%@\nСкорее всего, не хватает прав — нажми «Выдать права helper'у».";
+"Helper not found next to the app." = "Не найден helper рядом с приложением.";
+"Failed to grant privileges: %@" = "Не удалось выдать права: %@";
+
+/* Menu bar */
+"Show window" = "Показать окно";
+"Quit" = "Выход";

@@ -384,7 +384,7 @@ final class Model: ObservableObject {
     }
     @Published var hasFreq: Bool = false
 
-    var statusHandler: ((String) -> Void)?
+    var statusHandler: ((_ title: String, _ tooltip: String) -> Void)?
     var hwModel: String = ""
 
     private let smc: SMCReader?
@@ -507,11 +507,37 @@ final class Model: ObservableObject {
         updateThrottleState(freq: freq, util: utilTotal)
         runControlLoop()
 
+        // menu bar: temperature only in the title; everything else in a hover hint
         let coreTemps = newSensors.filter { $0.name.hasPrefix("CPU Core") }.map { $0.value }
         let cpu = coreTemps.isEmpty ? (sampleVals["TC0P"] ?? 0)
                                     : coreTemps.reduce(0, +) / Double(coreTemps.count)
-        let rpm = newFans.first?.rpm ?? 0
-        statusHandler?(String(format: "%.0f°  %.0f rpm", cpu, rpm))
+
+        var tip = ""
+        for f in newFans {
+            let mode: String
+            switch rules[f.id] ?? .auto {
+            case .auto:
+                mode = L("Auto")
+            case .constant:
+                mode = L("Constant RPM")
+            case .sensor(let key, let from, let to):
+                mode = String(format: L("by %@"), sensorName(key))
+                     + String(format: " (%d–%d°)", Int(from), Int(to))
+            }
+            tip += "\(f.name): \(Int(f.rpm)) RPM — \(mode)\n"
+        }
+        tip += "\n"
+        tip += L("Spike boost") + ": \(Int(boostPerDeg)) RPM/(°C/s)\n"
+        tip += L("Release speed") + ": \(Int(releaseRPMps)) RPM/s\n"
+        tip += L("Throttle guard") + ": "
+        if throttleGuard {
+            tip += String(format: "< %.1f GHz", throttleGHz)
+            if throttleActive { tip += " — " + L("THROTTLE") + "!" }
+        } else {
+            tip += L("off")
+        }
+
+        statusHandler?(String(format: "%.0f°", cpu), tip)
     }
 
     /// Throttle detector: frequency below the threshold while the CPU is busy.
@@ -1491,11 +1517,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var blastItem: NSMenuItem?
     private var quitItem: NSMenuItem?
     private var langWatcher: AnyCancellable?
+    private var throttleWatcher: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        item.button?.title = "--° -- rpm"
+        item.button?.title = "--°"
+        // template fan icon: adapts to light/dark menu bar automatically
+        if let img = NSImage(systemSymbolName: "fanblades",
+                             accessibilityDescription: "Mac Fanatic") {
+            img.isTemplate = true
+            item.button?.image = img
+            item.button?.imagePosition = .imageLeft
+        }
 
         let menu = NSMenu()
         let show = NSMenuItem(title: L("Show window"), action: #selector(showWindow),
@@ -1520,8 +1554,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
         showItem = show; autoItem = auto; blastItem = blast; quitItem = quit
 
-        Model.shared.statusHandler = { [weak item] text in
-            item?.button?.title = text
+        Model.shared.statusHandler = { [weak item] title, tooltip in
+            item?.button?.title = title
+            item?.button?.toolTip = tooltip
         }
 
         // language change → refresh status-bar menu item titles
@@ -1532,6 +1567,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.autoItem?.title = L("All fans to auto")
                 self?.blastItem?.title = L("Full Blast")
                 self?.quitItem?.title = L("Quit")
+            }
+
+        // throttle guard active → tint the menu bar item red
+        throttleWatcher = Model.shared.$throttleActive
+            .receive(on: DispatchQueue.main)
+            .sink { [weak item] active in
+                item?.button?.contentTintColor = active ? .systemRed : nil
             }
 
         // Grab the main window with retries: a single async shot isn't

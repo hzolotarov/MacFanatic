@@ -1,12 +1,8 @@
 # Mac Fanatic
 
-![Icon](icon-256.png)
-
-
 Fan control for Intel Macs with a PD control loop, throttle guard, and
 Power Gadget-style live graphs. Born as a Macs Fan Control clone, ended up
-doing a few things the original doesn't. Built using an AI-assisted vibe coding 
-workflow with Claude.
+doing a few things the original doesn't.
 
 ![macOS 12+](https://img.shields.io/badge/macOS-12%2B-blue) ![Intel only](https://img.shields.io/badge/arch-Intel-lightgrey)
 
@@ -41,11 +37,6 @@ workflow with Claude.
   language is one `.strings` file, zero code changes. In-app language picker.
 - Rules persist across launches; on quit the app hands fans back to SMC
   automatics without touching saved rules.
-
-![Main Window](MainWindow.png)
-![Main Window](MainWindowReaction.png)
-![Main Window](MainWindowSensorbased.png)
-
 
 ## Architecture
 
@@ -88,12 +79,57 @@ The throttle guard is the headline feature for 2018 i9 owners — it detects
 VRM/BD PROCHOT throttling by watching frequency, which no temperature
 sensor can see. Without Power Gadget it is silently unavailable.
 
+## Install
+
+### Option A — build from source (recommended)
+
+No Gatekeeper drama: locally built apps are trusted by definition.
+
+```bash
+make app                     # builds the CLI, the GUI, and MacFanatic.app
+make helper                  # one-time: setuid for the helper (asks for sudo)
+make icon SRC=your-icon.png  # optional: generate AppIcon.icns (before make app)
+open MacFanatic.app
+```
+
+### Option B — install from the DMG
+
+Grab `MacFanatic.dmg` from Releases (or build one: `make app && make dmg`),
+open it, drag **Mac Fanatic** to **Applications**. Then two one-time steps:
+
+**1. Calm down Gatekeeper.** This app is not signed or notarized, because
+Apple charges $99/year for the privilege of your users not seeing a scary
+"damaged" dialog — a fee that makes little sense for a free open-source
+tool. So on first launch macOS will claim the app is damaged or from an
+unidentified developer. Pick any one of:
+
+- right-click the app → **Open** → **Open** (works on most versions), or
+- System Settings → **Privacy & Security** → **Open Anyway**, or
+- the terminal hammer:
+
+  ```bash
+  xattr -cr /Applications/MacFanatic.app
+  ```
+
+  (this strips the quarantine attribute the DMG download attached)
+
+**2. Re-grant helper privileges.** The fan-writing helper needs setuid root,
+and file permissions like that deliberately do not survive being copied
+around in a disk image. Just launch the app and click
+**"Grant helper privileges…"** — one admin password prompt, done.
+Reading (temperatures, RPM, graphs) works without it; only fan *control*
+needs the helper.
+
+If you ever rebuild or re-copy the app, repeat step 2 — setuid dies with
+every fresh copy of the binary, which is exactly how it should be.
+
 ## Build
 
 ```bash
 make app                     # builds the CLI, the GUI, and MacFanatic.app
 make helper                  # one-time: setuid for the helper (asks for sudo)
-make icon SRC=icon.png  # optional: generate AppIcon.icns (before make app)
+make icon SRC=your-icon.png  # optional: generate AppIcon.icns (before make app)
+make dmg                     # optional: distributable MacFanatic.dmg
 open MacFanatic.app
 ```
 
@@ -116,3 +152,7 @@ The language picker discovers `*.lproj` folders automatically.
   outside the hardware envelope.
 - Apple Silicon is not supported (different SMC keys and write path).
 
+## License
+
+Do whatever you want with it. If it sets your MacBook on fire, that was
+the i9, not us.

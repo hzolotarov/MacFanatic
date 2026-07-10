@@ -60,4 +60,19 @@ helper:
 	fi
 
 clean:
-	rm -rf smcfan SMCFanGUI MacFanatic.app
+	rm -rf smcfan SMCFanGUI MacFanatic.app MacFanatic.dmg dmg-staging
+
+# Distributable disk image: MacFanatic.app + an /Applications symlink —
+# the classic "drag to install" layout.
+dmg:
+	@test -d MacFanatic.app || { echo "run 'make app' first"; exit 1; }
+	rm -rf dmg-staging MacFanatic.dmg
+	mkdir dmg-staging
+	cp -R MacFanatic.app dmg-staging/
+	ln -s /Applications dmg-staging/Applications
+	hdiutil create -volname "Mac Fanatic" \
+		-srcfolder dmg-staging \
+		-format UDZO -imagekey zlib-level=9 \
+		MacFanatic.dmg
+	rm -rf dmg-staging
+	@echo "MacFanatic.dmg ready"

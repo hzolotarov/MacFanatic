@@ -1,6 +1,6 @@
 # Mac Fanatic
 
-![Icon](icon.png)
+![Icon](icon-256.png)
 Fan control for Intel Macs with a PD control loop, throttle guard, and
 Power Gadget-style live graphs. Born as a Macs Fan Control clone, ended up
 doing a few things the original doesn't.

@@ -27,15 +27,21 @@ app: all
 			echo "  localization: $$d"; \
 		fi; \
 	done
+	@if [ ! -f AppIcon.icns ] && [ -f icon.png ]; then \
+		$(MAKE) icon; \
+	fi
 	@if [ -f AppIcon.icns ]; then \
 		cp AppIcon.icns MacFanatic.app/Contents/Resources/; \
 		echo "  icon: AppIcon.icns"; \
 	fi
 	@echo "Done: MacFanatic.app  (don't forget: make helper)"
 
-# Build AppIcon.icns from any square PNG:  make icon SRC=path/to/icon.png
+# Build AppIcon.icns from a square PNG. Default source: icon.png
+#   make icon              (uses icon.png)
+#   make icon SRC=other.png
+SRC ?= icon.png
 icon:
-	@test -n "$(SRC)" || { echo "usage: make icon SRC=path/to/icon.png"; exit 1; }
+	@test -f "$(SRC)" || { echo "no $(SRC) found; usage: make icon SRC=path/to/icon.png"; exit 1; }
 	rm -rf AppIcon.iconset && mkdir AppIcon.iconset
 	@for s in 16 32 128 256 512; do \
 		sips -z $$s $$s "$(SRC)" --out AppIcon.iconset/icon_$${s}x$${s}.png >/dev/null; \

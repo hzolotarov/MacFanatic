@@ -88,14 +88,15 @@ No Gatekeeper drama: locally built apps are trusted by definition.
 ```bash
 make app                     # builds the CLI, the GUI, and MacFanatic.app
 make helper                  # one-time: setuid for the helper (asks for sudo)
-make icon SRC=icon.png  # optional: generate AppIcon.icns (before make app)
+# icon: drop icon.png next to the Makefile — make app picks it up automatically
 open MacFanatic.app
 ```
 
 ### Option B — install from the DMG
 
-Grab `MacFanatic.dmg` from Releases (or build one: `make app && make dmg`),
-open it, drag **Mac Fanatic** to **Applications**. Then two one-time steps:
+Download **[MacFanatic.dmg](MacFanatic.dmg)** (shipped in the repo root;
+or build your own: `make app && make dmg`), open it, drag **Mac Fanatic**
+to **Applications**. Then two one-time steps:
 
 **1. Calm down Gatekeeper.** This app is not signed or notarized, because
 Apple charges $99/year for the privilege of your users not seeing a scary
@@ -128,7 +129,7 @@ every fresh copy of the binary, which is exactly how it should be.
 ```bash
 make app                     # builds the CLI, the GUI, and MacFanatic.app
 make helper                  # one-time: setuid for the helper (asks for sudo)
-make icon SRC=your-icon.png  # optional: generate AppIcon.icns (before make app)
+# icon: drop icon.png next to the Makefile — make app picks it up automatically
 make dmg                     # optional: distributable MacFanatic.dmg
 open MacFanatic.app
 ```

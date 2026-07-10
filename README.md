@@ -42,6 +42,9 @@ doing a few things the original doesn't.
   automatics without touching saved rules.
 
 ![Main Window](MainWindow.png)
+![Main Window](MainWindowReaction.png)
+![Main Window](MainWindowSensorbased.png)
+
 
 ## Architecture
 

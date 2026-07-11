@@ -72,12 +72,25 @@ and drive the CLI with `sudo` yourself.
 | Temperatures, RPM, utilization   | ✅                   | ✅                |
 | Power graph (PKG/CORE)           | ✅ via SMC fallback  | ✅ RAPL           |
 | Power graph (DRAM)               | ❌                   | ✅                |
-| Frequency graph                  | ❌ (hidden)          | ✅                |
-| **Throttle guard**               | ❌ (needs frequency) | ✅                |
+| Frequency graph                  | ✅ via `powermetrics`¹ | ✅ RAPL         |
+| **Throttle guard**               | ✅ ¹                 | ✅                |
+
+¹ Requires the setuid helper (`make helper` or the in-app button): frequency
+is fetched through Apple's own `powermetrics`, which needs root. Power Gadget
+remains the lighter-weight source when present — but its background agent is
+known to hold a `PreventUserIdleSystemSleep` power assertion indefinitely,
+keeping the machine from ever sleeping. With the helper installed you can
+uninstall Power Gadget entirely and lose only the DRAM power line.
 
 The throttle guard is the headline feature for 2018 i9 owners — it detects
 VRM/BD PROCHOT throttling by watching frequency, which no temperature
-sensor can see. Without Power Gadget it is silently unavailable.
+sensor can see.
+
+> **Metrics showing "—" with Power Gadget installed?** On some setups the
+> Power Gadget driver stays dormant until its own app has been launched.
+> Open Intel Power Gadget once (it can be quit afterwards on most systems);
+> Mac Fanatic picks the data up automatically — the Frequency graph appears
+> as soon as real numbers start flowing.
 
 ## Install
 

@@ -305,8 +305,9 @@ static void usage(const char *argv0)
         "  %s set <fan> <rpm>     — manual mode, set RPM (sudo)\n"
         "  %s max [fan]           — fan(s) to maximum (sudo)\n"
         "  %s auto [fan]          — back to SMC automatics, all or one (sudo)\n"
+        "  %s freq                — average CPU frequency, MHz (needs setuid helper)\n"
         "  %s watch [sec]         — status in a loop (default 2 s)\n",
-        argv0, argv0, argv0, argv0, argv0);
+        argv0, argv0, argv0, argv0, argv0, argv0);
 }
 
 int main(int argc, char **argv)
@@ -365,6 +366,41 @@ int main(int argc, char **argv)
             if (fan_set_mode(i, 0) != 0) rc = 1;
         if (rc) fprintf(stderr, "Write failed. Running under sudo?\n");
         else printf("Fan(s) returned to automatic mode.\n");
+
+    } else if (strcmp(argv[1], "freq") == 0) {
+        /* Average CPU frequency in MHz via Apple's powermetrics (needs root —
+         * that's us, we're setuid). powermetrics derives it from APERF/MPERF
+         * internally, so this is the real effective frequency. */
+        if (setuid(0) != 0) {
+            fprintf(stderr, "freq needs the setuid helper (make helper)\n");
+            smc_close();
+            return 1;
+        }
+        FILE *pm = popen("/usr/bin/powermetrics -n 1 -i 300 "
+                         "--samplers cpu_power 2>/dev/null", "r");
+        if (!pm) {
+            fprintf(stderr, "failed to run powermetrics\n");
+            smc_close();
+            return 1;
+        }
+        char line[512];
+        double mhz = -1, v;
+        while (fgets(line, sizeof line, pm)) {
+            if (strstr(line, "frequency")) {
+                char *paren = strchr(line, '(');
+                if (paren && sscanf(paren, "(%lf", &v) == 1 && v > 50 && v < 10000) {
+                    mhz = v;
+                    break;
+                }
+            }
+        }
+        pclose(pm);
+        if (mhz < 0) {
+            fprintf(stderr, "no frequency in powermetrics output\n");
+            rc = 1;
+        } else {
+            printf("%.0f\n", mhz);
+        }
 
     } else {
         usage(argv[0]);

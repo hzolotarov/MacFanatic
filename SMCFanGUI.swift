@@ -283,7 +283,10 @@ final class PowerGadget {
     private var iaPowerFn: PGPower?
     private var dramPowerFn: PGPower?
     private var releaseFn: PGRelease?
+    private var initFn: PGInit?
+    private var shutdownFn: PGInit?
     private var prev: UInt64 = 0
+    private var emptyReads = 0        // consecutive reads that yielded nothing
 
     struct Reading {
         var pkgW: Double?
@@ -298,6 +301,8 @@ final class PowerGadget {
         guard let initSym = dlsym(h, "PG_Initialize"),
               unsafeBitCast(initSym, to: PGInit.self)()
         else { dlclose(h); return nil }
+        initFn = unsafeBitCast(initSym, to: PGInit.self)
+        shutdownFn = dlsym(h, "PG_Shutdown").map { unsafeBitCast($0, to: PGInit.self) }
 
         readSampleFn = dlsym(h, "PG_ReadSample").map { unsafeBitCast($0, to: PGReadSample.self) }
         freqFn       = dlsym(h, "PGSample_GetIAFrequency").map { unsafeBitCast($0, to: PGFreq.self) }
@@ -311,11 +316,18 @@ final class PowerGadget {
     }
 
     /// Metrics over the interval between the previous and current sample.
+    /// Self-healing: a stale PG session can produce endless empty samples
+    /// (framework alive, data dead) — after a few of those, shutdown and
+    /// re-initialize the session. A restart of the host app fixes it, so
+    /// re-init from within does the same without the restart.
     func read() -> Reading {
         var r = Reading()
         guard let readSample = readSampleFn, prev != 0 else { return r }
         var cur: UInt64 = 0
-        guard readSample(0, &cur), cur != 0 else { return r }
+        guard readSample(0, &cur), cur != 0 else {
+            noteEmptyRead()
+            return r
+        }
         var a = 0.0, b = 0.0, c = 0.0
         if let f = freqFn, f(prev, cur, &a, &b, &c) { r.freqGHz = a / 1000.0 }  // MHz → GHz
         if let f = pkgPowerFn,  f(prev, cur, &a, &b) { r.pkgW  = a }
@@ -323,7 +335,24 @@ final class PowerGadget {
         if let f = dramPowerFn, f(prev, cur, &a, &b) { r.dramW = a }
         _ = releaseFn?(prev)
         prev = cur
+
+        if r.freqGHz == nil && r.pkgW == nil && r.coreW == nil && r.dramW == nil {
+            noteEmptyRead()
+        } else {
+            emptyReads = 0
+        }
         return r
+    }
+
+    private func noteEmptyRead() {
+        emptyReads += 1
+        guard emptyReads >= 3 else { return }
+        emptyReads = 0
+        _ = shutdownFn?()
+        if initFn?() == true {
+            prev = 0
+            _ = readSampleFn?(0, &prev)   // fresh anchor sample
+        }
     }
 }
 
@@ -390,6 +419,11 @@ final class Model: ObservableObject {
     private let smc: SMCReader?
     private var powerGadget: PowerGadget?
     private var prevTicks: [[UInt32]] = []
+    private var freqMissCount = 0          // consecutive polls with no frequency data
+    private var smcPkgKey: String?         // discovered SMC power keys (fallback)
+    private var smcCoreKey: String?
+    private var helperFreq: Double?        // last frequency from `smcfan-cli freq`, GHz
+    private var helperFreqInFlight = false
     private var timer: Timer?
     private var tempKeys: [String] = []
     private var commanded: [Int: Double] = [:]                            // last commanded RPM
@@ -404,7 +438,7 @@ final class Model: ObservableObject {
             code: UserDefaults.standard.string(forKey: "appLanguage") ?? "system")
         smc = SMCReader()
         powerGadget = PowerGadget()
-        hasFreq = powerGadget != nil
+        // hasFreq stays false until frequency data actually arrives (see poll)
         hwModel = Self.sysctlString("hw.model")
         discoverSensors()
         loadRules()
@@ -435,6 +469,14 @@ final class Model: ObservableObject {
 
         for k in ["TC0P", "TG0P"] where tempKeys.contains(k) { plotted.insert(k) }
         if plotted.isEmpty, let first = tempKeys.first { plotted.insert(first) }
+
+        // SMC power keys vary between models — probe candidates once.
+        for k in ["PCPT", "PSTR", "PCTR", "PDTR"] {
+            if let v = smc.readDouble(k), v > 0, v < 300 { smcPkgKey = k; break }
+        }
+        for k in ["PCPC", "PC0C", "PC0R"] {
+            if let v = smc.readDouble(k), v > 0, v < 300 { smcCoreKey = k; break }
+        }
     }
 
     private func fanName(_ i: Int, total: Int) -> String {
@@ -490,9 +532,27 @@ final class Model: ObservableObject {
             if let v = r.dramW { power["DRAM"] = v }
             freq = r.freqGHz
         }
-        // fallback: SMC exposes package/core watts via the PCPT/PCPC keys
-        if power["PKG"] == nil,  let v = smc.readDouble("PCPT"), v > 0, v < 300 { power["PKG"]  = v }
-        if power["CORE"] == nil, let v = smc.readDouble("PCPC"), v > 0, v < 300 { power["CORE"] = v }
+        // Frequency fallback: no Power Gadget data → Apple's powermetrics via
+        // the setuid helper (it computes APERF/MPERF-based effective frequency).
+        // Async with a one-poll lag: use the last fetched value, kick a new fetch.
+        if freq == nil, helperOK {
+            freq = helperFreq
+            fetchFreqViaHelper()
+        }
+        // hasFreq reflects actual DATA, not just "framework loaded": Power
+        // Gadget's driver may be dormant until its app runs, returning nils.
+        if freq != nil {
+            freqMissCount = 0
+            if !hasFreq { hasFreq = true }
+        } else {
+            freqMissCount += 1
+            if hasFreq && freqMissCount >= 3 { hasFreq = false }
+        }
+        // fallback: SMC exposes watts via model-specific keys probed at startup
+        if power["PKG"] == nil, let k = smcPkgKey,
+           let v = smc.readDouble(k), v > 0, v < 300 { power["PKG"] = v }
+        if power["CORE"] == nil, let k = smcCoreKey,
+           let v = smc.readDouble(k), v > 0, v < 300 { power["CORE"] = v }
         let (utilTotal, utilCores) = cpuUtilization()
 
         fans = newFans
@@ -786,6 +846,7 @@ final class Model: ObservableObject {
         return true
     }
 
+    /// As runCLI(set...) but silent — for the control loop.
     @discardableResult
     private func setRPMQuiet(fan: Int, rpm: Double) -> Bool {
         guard let path = cliPath else { return false }
@@ -796,6 +857,37 @@ final class Model: ObservableObject {
         do { try p.run() } catch { return false }
         p.waitUntilExit()
         return p.terminationStatus == 0
+    }
+
+    /// Frequency via `smcfan-cli freq` (powermetrics under the hood, ~0.5 s
+    /// per sample) — off the main thread, result lands in helperFreq for the
+    /// next poll. Never more than one fetch in flight.
+    private func fetchFreqViaHelper() {
+        guard !helperFreqInFlight, let path = cliPath else { return }
+        helperFreqInFlight = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            var ghz: Double? = nil
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: path)
+            p.arguments = ["freq"]
+            let pipe = Pipe()
+            p.standardOutput = pipe
+            p.standardError = Pipe()
+            if (try? p.run()) != nil {
+                p.waitUntilExit()
+                if p.terminationStatus == 0 {
+                    let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(),
+                                     encoding: .utf8) ?? ""
+                    if let mhz = Double(out.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                        ghz = mhz / 1000.0
+                    }
+                }
+            }
+            DispatchQueue.main.async {
+                self?.helperFreq = ghz
+                self?.helperFreqInFlight = false
+            }
+        }
     }
 
     func installHelper() {
@@ -816,6 +908,80 @@ final class Model: ObservableObject {
 }
 
 // MARK: - Graph colors
+
+/// Nice X-axis tick times for a given window: round steps, aligned to the clock.
+func xTicks(start: Date, span: TimeInterval) -> (dates: [Date], step: TimeInterval) {
+    let step: TimeInterval
+    switch span {
+    case ..<90:    step = 15      // 1 min window  → every 15 s
+    case ..<420:   step = 60      // 5 min         → every minute
+    case ..<1200:  step = 180     // 15 min        → every 3 min
+    case ..<4000:  step = 600     // 1 h           → every 10 min
+    default:       step = 1800    // 2 h           → every 30 min
+    }
+    var t = (start.timeIntervalSinceReferenceDate / step).rounded(.up) * step
+    let end = start.timeIntervalSinceReferenceDate + span
+    var out: [Date] = []
+    while t < end {
+        out.append(Date(timeIntervalSinceReferenceDate: t))
+        t += step
+    }
+    return (out, step)
+}
+
+/// Thin shared time axis under the graph stack. All graphs use the same
+/// samples + window, so their X coordinates are identical to this strip's.
+struct TimeAxis: View {
+    let samples: [Sample]
+    let window: TimeInterval
+
+    private static let fmtHM: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+    }()
+    private static let fmtHMS: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
+    }()
+
+    var body: some View {
+        GeometryReader { geo in
+            let now = samples.last?.time ?? Date()
+            let dataStart = samples.first?.time ?? now
+            let span = min(window, max(now.timeIntervalSince(dataStart), 10))
+            let start = now.addingTimeInterval(-span)
+            let (ticks, step) = xTicks(start: start, span: span)
+            let fmt = step < 60 ? Self.fmtHMS : Self.fmtHM
+            ZStack(alignment: .topLeading) {
+                ForEach(ticks, id: \.self) { t in
+                    let x = 42 + CGFloat(t.timeIntervalSince(start) / span)
+                               * (geo.size.width - 42)
+                    Text(fmt.string(from: t))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .position(x: min(max(x, 24), geo.size.width - 24), y: 7)
+                }
+            }
+        }
+    }
+}
+
+/// Vertical gridlines at the shared X ticks — drop into any graph's ZStack.
+struct XGrid: View {
+    let start: Date
+    let span: TimeInterval
+    let size: CGSize
+
+    var body: some View {
+        ForEach(xTicks(start: start, span: span).dates, id: \.self) { t in
+            let x = 42 + CGFloat(t.timeIntervalSince(start) / span) * (size.width - 42)
+            Path { p in
+                p.move(to: CGPoint(x: x, y: 0))
+                p.addLine(to: CGPoint(x: x, y: size.height))
+            }
+            .stroke(Color.primary.opacity(0.10),
+                    style: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
+        }
+    }
+}
 
 let sensorPalette: [Color] = [.red, .orange, .green, .blue, .purple, .pink,
                               .yellow, .gray, .cyan, .brown]
@@ -1085,6 +1251,7 @@ struct RPMGraph: View {
             let range = max(hi - lo, 1)
 
             ZStack(alignment: .topLeading) {
+                XGrid(start: start, span: span, size: geo.size)
                 ForEach(0..<3, id: \.self) { i in
                     let frac = CGFloat(i) / 2
                     let y = geo.size.height * frac
@@ -1152,6 +1319,7 @@ struct TempGraph: View {
             let range = max(hi - lo, 1)
 
             ZStack(alignment: .topLeading) {
+                XGrid(start: start, span: span, size: geo.size)
                 ForEach(0..<5, id: \.self) { i in
                     let frac = CGFloat(i) / 4
                     let y = geo.size.height * frac
@@ -1250,6 +1418,7 @@ struct MiniGraph: View {
                 let hi = fixedMax ?? max((allVals.max() ?? 1) * 1.15, 1)
 
                 ZStack(alignment: .topLeading) {
+                    XGrid(start: start, span: span, size: geo.size)
                     // Power Gadget-style grid: dense crisp dashes + labels
                     ForEach(0..<5, id: \.self) { i in
                         let frac = CGFloat(i) / 4
@@ -1464,6 +1633,9 @@ struct ContentView: View {
                           fixedMax: 100,
                           perCoreToggle: $model.utilPerCore)
                     .frame(height: 116)
+
+                TimeAxis(samples: model.samples, window: model.window)
+                    .frame(height: 14)
             }
             .frame(minWidth: 480)
 

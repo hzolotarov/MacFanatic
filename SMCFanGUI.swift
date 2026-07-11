@@ -909,6 +909,12 @@ final class Model: ObservableObject {
 
 // MARK: - Graph colors
 
+/// Graph background: calm gray normally, a blush of red while the CPU is
+/// throttled — the color of user posteriors ignited by Apple's thermal design.
+func graphBackground(hot: Bool) -> Color {
+    hot ? Color.red.opacity(0.10) : Color.primary.opacity(0.04)
+}
+
 /// Nice X-axis tick times for a given window: round steps, aligned to the clock.
 func xTicks(start: Date, span: TimeInterval) -> (dates: [Date], step: TimeInterval) {
     let step: TimeInterval
@@ -1157,7 +1163,7 @@ struct FanRowMFC: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
+        .background(RoundedRectangle(cornerRadius: 6).fill(graphBackground(hot: hot)))
     }
 }
 
@@ -1242,6 +1248,7 @@ struct RPMGraph: View {
     let samples: [Sample]
     let fans: [FanState]
     let window: TimeInterval
+    var hot: Bool = false
 
     private func linePoints(fan: Int, pts: [Sample], start: Date, span: TimeInterval,
                             lo: Double, range: Double, size: CGSize) -> [CGPoint] {
@@ -1311,7 +1318,7 @@ struct RPMGraph: View {
                 }
             }
         }
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
+        .background(RoundedRectangle(cornerRadius: 6).fill(graphBackground(hot: hot)))
     }
 }
 
@@ -1322,6 +1329,7 @@ struct TempGraph: View {
     let sensors: [SensorReading]
     let plotted: Set<String>
     let window: TimeInterval
+    var hot: Bool = false
 
     var body: some View {
         GeometryReader { geo in
@@ -1375,7 +1383,7 @@ struct TempGraph: View {
                 }
             }
         }
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
+        .background(RoundedRectangle(cornerRadius: 6).fill(graphBackground(hot: hot)))
     }
 }
 
@@ -1395,6 +1403,7 @@ struct MiniGraph: View {
     let window: TimeInterval
     var fixedMax: Double? = nil
     var perCoreToggle: Binding<Bool>? = nil
+    var hot: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -1466,7 +1475,7 @@ struct MiniGraph: View {
                     }
                 }
             }
-            .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.04)))
+            .background(RoundedRectangle(cornerRadius: 5).fill(graphBackground(hot: hot)))
         }
     }
 }
@@ -1600,7 +1609,8 @@ struct ContentView: View {
                 TempGraph(samples: model.samples,
                           sensors: model.sensors,
                           plotted: model.plotted,
-                          window: model.window)
+                          window: model.window,
+                          hot: model.throttleActive)
                     .frame(minHeight: 140)
 
                 // chips: line color + live RPM
@@ -1620,7 +1630,8 @@ struct ContentView: View {
 
                 RPMGraph(samples: model.samples,
                          fans: model.fans,
-                         window: model.window)
+                         window: model.window,
+                         hot: model.throttleActive)
                     .frame(height: 100)
 
                 // --- Power / Frequency / Utilization, Power Gadget-style ---
@@ -1633,27 +1644,30 @@ struct ContentView: View {
                             MetricLine(label: "DRAM", color: .orange,
                                        value: { $0.power["DRAM"] }),
                           ],
-                          samples: model.samples, window: model.window)
+                          samples: model.samples, window: model.window,
+                          hot: model.throttleActive)
                     .frame(height: 116)
                 if model.hasFreq {
                     MiniGraph(title: L("Frequency"), unit: "GHz",
                               lines: [MetricLine(label: "CORE", color: .purple,
                                                  value: { $0.freqGHz })],
                               samples: model.samples, window: model.window,
-                              fixedMax: 5)
+                              fixedMax: 5, hot: model.throttleActive)
                         .frame(height: 116)
                 }
                 MiniGraph(title: L("Utilization"), unit: "%",
                           lines: utilLines,
                           samples: model.samples, window: model.window,
                           fixedMax: 100,
-                          perCoreToggle: $model.utilPerCore)
+                          perCoreToggle: $model.utilPerCore,
+                          hot: model.throttleActive)
                     .frame(height: 116)
 
                 TimeAxis(samples: model.samples, window: model.window)
                     .frame(height: 14)
                 }
                 .overlay(StackXGrid(samples: model.samples, window: model.window))
+                .animation(.easeInOut(duration: 0.6), value: model.throttleActive)
             }
             .frame(minWidth: 480)
 

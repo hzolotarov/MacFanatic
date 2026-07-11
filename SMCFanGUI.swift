@@ -964,7 +964,25 @@ struct TimeAxis: View {
     }
 }
 
-/// Vertical gridlines at the shared X ticks — drop into any graph's ZStack.
+/// Full-stack overlay: one continuous set of vertical time lines running
+/// through every graph, the gaps, the legends — the whole column.
+struct StackXGrid: View {
+    let samples: [Sample]
+    let window: TimeInterval
+
+    var body: some View {
+        GeometryReader { geo in
+            let now = samples.last?.time ?? Date()
+            let dataStart = samples.first?.time ?? now
+            let span = min(window, max(now.timeIntervalSince(dataStart), 10))
+            let start = now.addingTimeInterval(-span)
+            XGrid(start: start, span: span, size: geo.size)
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// Vertical gridlines at the shared X ticks.
 struct XGrid: View {
     let start: Date
     let span: TimeInterval
@@ -977,8 +995,8 @@ struct XGrid: View {
                 p.move(to: CGPoint(x: x, y: 0))
                 p.addLine(to: CGPoint(x: x, y: size.height))
             }
-            .stroke(Color.primary.opacity(0.10),
-                    style: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
+            .stroke(Color.primary.opacity(0.35),
+                    style: StrokeStyle(lineWidth: 0.8, dash: [3, 3]))
         }
     }
 }
@@ -1251,7 +1269,6 @@ struct RPMGraph: View {
             let range = max(hi - lo, 1)
 
             ZStack(alignment: .topLeading) {
-                XGrid(start: start, span: span, size: geo.size)
                 ForEach(0..<3, id: \.self) { i in
                     let frac = CGFloat(i) / 2
                     let y = geo.size.height * frac
@@ -1319,7 +1336,6 @@ struct TempGraph: View {
             let range = max(hi - lo, 1)
 
             ZStack(alignment: .topLeading) {
-                XGrid(start: start, span: span, size: geo.size)
                 ForEach(0..<5, id: \.self) { i in
                     let frac = CGFloat(i) / 4
                     let y = geo.size.height * frac
@@ -1418,8 +1434,7 @@ struct MiniGraph: View {
                 let hi = fixedMax ?? max((allVals.max() ?? 1) * 1.15, 1)
 
                 ZStack(alignment: .topLeading) {
-                    XGrid(start: start, span: span, size: geo.size)
-                    // Power Gadget-style grid: dense crisp dashes + labels
+                        // Power Gadget-style grid: dense crisp dashes + labels
                     ForEach(0..<5, id: \.self) { i in
                         let frac = CGFloat(i) / 4
                         let y = geo.size.height * frac
@@ -1581,6 +1596,7 @@ struct ContentView: View {
                     .frame(width: 300)
                 }
 
+                VStack(alignment: .leading, spacing: 10) {
                 TempGraph(samples: model.samples,
                           sensors: model.sensors,
                           plotted: model.plotted,
@@ -1636,6 +1652,8 @@ struct ContentView: View {
 
                 TimeAxis(samples: model.samples, window: model.window)
                     .frame(height: 14)
+                }
+                .overlay(StackXGrid(samples: model.samples, window: model.window))
             }
             .frame(minWidth: 480)
 

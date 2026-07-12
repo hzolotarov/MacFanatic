@@ -1,11 +1,15 @@
+# Single source of truth for the version — everything else is injected
+# from here at build time (Info.plist, CLI binary, README badge, DMG).
+VERSION := $(shell cat VERSION 2>/dev/null || echo 0.0.0)
+
 CC      ?= cc
 CFLAGS  ?= -O2 -Wall
 SWIFTC  ?= swiftc
 
 all: smcfan SMCFanGUI
 
-smcfan: smcfan.c
-	$(CC) $(CFLAGS) -o $@ $< -framework IOKit -framework CoreFoundation
+smcfan: smcfan.c VERSION
+	$(CC) $(CFLAGS) -DSMCFAN_VERSION='"$(VERSION)"' -o $@ $< -framework IOKit -framework CoreFoundation
 
 SMCFanGUI: SMCFanGUI.swift
 	$(SWIFTC) -O -parse-as-library $< -o $@
@@ -19,7 +23,7 @@ app: all
 	mkdir -p MacFanatic.app/Contents/Resources/en.lproj
 	cp SMCFanGUI MacFanatic.app/Contents/MacOS/MacFanatic
 	cp smcfan   MacFanatic.app/Contents/MacOS/smcfan-cli
-	cp Info.plist MacFanatic.app/Contents/Info.plist
+	sed "s/__VERSION__/$(VERSION)/g" Info.plist > MacFanatic.app/Contents/Info.plist
 	@for d in *.lproj; do \
 		if [ -d "$$d" ]; then \
 			mkdir -p "MacFanatic.app/Contents/Resources/$$d"; \
@@ -34,7 +38,8 @@ app: all
 		cp AppIcon.icns MacFanatic.app/Contents/Resources/; \
 		echo "  icon: AppIcon.icns"; \
 	fi
-	@echo "Done: MacFanatic.app  (don't forget: make helper)"
+	@$(MAKE) -s readme-version
+	@echo "Done: MacFanatic.app $(VERSION)  (don't forget: make helper)"
 
 # Build AppIcon.icns from a square PNG. Default source: icon.png
 #   make icon              (uses icon.png)
@@ -76,9 +81,20 @@ dmg:
 	mkdir dmg-staging
 	cp -R MacFanatic.app dmg-staging/
 	ln -s /Applications dmg-staging/Applications
-	hdiutil create -volname "Mac Fanatic" \
+	hdiutil create -volname "Mac Fanatic $(VERSION)" \
 		-srcfolder dmg-staging \
 		-format UDZO -imagekey zlib-level=9 \
 		MacFanatic.dmg
 	rm -rf dmg-staging
 	@echo "MacFanatic.dmg ready"
+
+# Keep the README version badge in sync (invoked automatically by `make app`)
+readme-version:
+	@sed -E -i '' 's|version-[0-9]+\.[0-9]+\.[0-9]+-|version-$(VERSION)-|' README.md 2>/dev/null || true
+
+# Bump the version everywhere:  make bump V=1.0.1
+bump:
+	@test -n "$(V)" || { echo "usage: make bump V=x.y.z"; exit 1; }
+	@echo "$(V)" > VERSION
+	@$(MAKE) -s readme-version VERSION=$(V)
+	@echo "version bumped to $(V) — rebuild with 'make app'"

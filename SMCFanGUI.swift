@@ -73,6 +73,12 @@ enum Lang {
     }
 }
 
+/// App version, injected by `make app` into Info.plist from the VERSION file.
+/// A bare binary (no bundle) reports "dev".
+let appVersionString: String =
+    (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
+        .map { "v" + $0 } ?? "dev"
+
 @inline(__always) func L(_ key: String) -> String {
     Lang.localize(key)
 }
@@ -222,6 +228,11 @@ struct SensorReading: Identifiable, Equatable {
     var isRaw: Bool { name == key }
 }
 
+struct ThrottleSpan: Equatable {
+    var start: Date
+    var end: Date?          // nil = still throttling
+}
+
 struct Sample {
     let time: Date
     let values: [String: Double]     // temperatures: SMC key → °C
@@ -365,7 +376,9 @@ final class Model: ObservableObject {
     @Published var fans: [FanState] = []
     @Published var sensors: [SensorReading] = []
     @Published var rules: [Int: FanRule] = [:]
-    @Published var plotted: Set<String> = []
+    @Published var plotted: Set<String> = [] {
+        didSet { UserDefaults.standard.set(Array(plotted), forKey: "plottedSensors") }
+    }
     @Published var samples: [Sample] = []
     @Published var window: TimeInterval = 300
     @Published var alertMessage: String? = nil
@@ -406,7 +419,23 @@ final class Model: ObservableObject {
         (UserDefaults.standard.object(forKey: "throttleGHz") as? Double) ?? 1.6 {
         didSet { UserDefaults.standard.set(throttleGHz, forKey: "throttleGHz") }
     }
-    @Published var throttleActive: Bool = false
+    @Published var throttleActive: Bool = false {
+        didSet {
+            guard oldValue != throttleActive else { return }
+            let now = Date()
+            if throttleActive {
+                throttleSpans.append(ThrottleSpan(start: now, end: nil))
+            } else if let i = throttleSpans.indices.last, throttleSpans[i].end == nil {
+                throttleSpans[i].end = now
+            }
+        }
+    }
+    // Recorded throttle episodes — drawn as pink bands on the graphs and kept
+    // as long as the sample history covers them.
+    @Published var throttleSpans: [ThrottleSpan] = []
+    // Last non-auto rule per fan: switching to Auto no longer wipes your
+    // carefully tuned custom setup — the editor restores it.
+    @Published var lastCustom: [Int: FanRule] = [:]
 
     @Published var utilPerCore: Bool = UserDefaults.standard.bool(forKey: "utilPerCore") {
         didSet { UserDefaults.standard.set(utilPerCore, forKey: "utilPerCore") }
@@ -442,6 +471,7 @@ final class Model: ObservableObject {
         hwModel = Self.sysctlString("hw.model")
         discoverSensors()
         loadRules()
+        loadLastCustom()
         checkHelper()
         poll()
         timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
@@ -467,8 +497,15 @@ final class Model: ObservableObject {
         }
         tempKeys = found.sorted { sensorName($0) < sensorName($1) }
 
-        for k in ["TC0P", "TG0P"] where tempKeys.contains(k) { plotted.insert(k) }
-        if plotted.isEmpty, let first = tempKeys.first { plotted.insert(first) }
+        // restore last plotted selection; fall back to CPU/GPU proximity
+        let saved = Set(UserDefaults.standard.stringArray(forKey: "plottedSensors") ?? [])
+            .intersection(tempKeys)
+        if !saved.isEmpty {
+            plotted = saved
+        } else {
+            for k in ["TC0P", "TG0P"] where tempKeys.contains(k) { plotted.insert(k) }
+            if plotted.isEmpty, let first = tempKeys.first { plotted.insert(first) }
+        }
 
         // SMC power keys vary between models — probe candidates once.
         for k in ["PCPT", "PSTR", "PCTR", "PDTR"] {
@@ -563,6 +600,9 @@ final class Model: ObservableObject {
                               power: power, freqGHz: freq,
                               utilTotal: utilTotal, utilCores: utilCores))
         if samples.count > maxSamples { samples.removeFirst(samples.count - maxSamples) }
+        if let cutoff = samples.first?.time {
+            throttleSpans.removeAll { ($0.end ?? Date()) < cutoff }
+        }
 
         updateThrottleState(freq: freq, util: utilTotal)
         runControlLoop()
@@ -601,6 +641,9 @@ final class Model: ObservableObject {
     }
 
     /// Throttle detector: frequency below the threshold while the CPU is busy.
+    /// "Busy" is a LOW bar (>15%) on purpose: GPU-heavy renders throttle the
+    /// CPU while keeping its utilization modest, and the only false positive
+    /// we guard against is deep idle, where utilization is near zero.
     /// Exit ONLY on frequency recovery (with hysteresis).
     /// No "load is gone" exit: a stuck state (VRM/BD PROCHOT) persists even
     /// at idle, and max airflow is exactly what cures it.
@@ -615,7 +658,7 @@ final class Model: ObservableObject {
             if f > throttleGHz + 0.4 {
                 throttleActive = false
             }
-        } else if f < throttleGHz && (util ?? 0) > 40 {
+        } else if f < throttleGHz && (util ?? 0) > 15 {
             throttleActive = true
         }
     }
@@ -731,6 +774,10 @@ final class Model: ObservableObject {
     func apply(rule: FanRule, to fan: Int) {
         rules[fan] = rule
         saveRules()
+        if case .auto = rule {} else {
+            lastCustom[fan] = rule
+            saveLastCustom()
+        }
         commanded[fan] = nil
         derivState[fan] = nil
         switch rule {
@@ -781,6 +828,19 @@ final class Model: ObservableObject {
         if let data = try? JSONEncoder().encode(rules) {
             try? data.write(to: rulesURL)
         }
+    }
+
+    private func saveLastCustom() {
+        if let data = try? JSONEncoder().encode(lastCustom) {
+            UserDefaults.standard.set(data, forKey: "lastCustomRules")
+        }
+    }
+
+    private func loadLastCustom() {
+        guard let data = UserDefaults.standard.data(forKey: "lastCustomRules"),
+              let r = try? JSONDecoder().decode([Int: FanRule].self, from: data)
+        else { return }
+        lastCustom = r
     }
 
     private func loadRules() {
@@ -970,6 +1030,42 @@ struct TimeAxis: View {
     }
 }
 
+/// Pink history bands: every recorded throttle episode painted across the
+/// whole graph stack, from onset to recovery — a lasting reminder of where
+/// exactly the thermal design caught fire.
+struct ThrottleBands: View {
+    let spans: [ThrottleSpan]
+    let samples: [Sample]
+    let window: TimeInterval
+
+    var body: some View {
+        GeometryReader { geo in
+            let now = samples.last?.time ?? Date()
+            let dataStart = samples.first?.time ?? now
+            let spanSec = min(window, max(now.timeIntervalSince(dataStart), 10))
+            let start = now.addingTimeInterval(-spanSec)
+            ForEach(spans.indices, id: \.self) { i in
+                let ep = spans[i]
+                let epEnd = ep.end ?? now
+                if epEnd > start {
+                    let x0 = max(42, 42 + CGFloat(ep.start.timeIntervalSince(start) / spanSec)
+                                        * (geo.size.width - 42))
+                    let x1 = min(geo.size.width,
+                                 42 + CGFloat(epEnd.timeIntervalSince(start) / spanSec)
+                                    * (geo.size.width - 42))
+                    if x1 > x0 + 1 {
+                        Rectangle()
+                            .fill(Color.red.opacity(0.09))
+                            .frame(width: x1 - x0, height: geo.size.height)
+                            .position(x: (x0 + x1) / 2, y: geo.size.height / 2)
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 /// Full-stack overlay: one continuous set of vertical time lines running
 /// through every graph, the gaps, the legends — the whole column.
 struct StackXGrid: View {
@@ -1097,6 +1193,13 @@ struct RuleEditor: View {
             case .auto:
                 mode = 0
                 rpm = fan.target > 0 ? fan.target : fan.minRPM
+                // restore the last custom setup so toggling Auto isn't destructive
+                if case .constant(let r)? = model.lastCustom[fan.id] {
+                    rpm = r
+                }
+                if case .sensor(let k, let f, let t)? = model.lastCustom[fan.id] {
+                    sensorKey = k; from = f; to = t
+                }
             case .constant(let r):
                 mode = 1; rpm = r
             case .sensor(let k, let f, let t):
@@ -1163,7 +1266,7 @@ struct FanRowMFC: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
-        .background(RoundedRectangle(cornerRadius: 6).fill(graphBackground(hot: hot)))
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
     }
 }
 
@@ -1609,8 +1712,7 @@ struct ContentView: View {
                 TempGraph(samples: model.samples,
                           sensors: model.sensors,
                           plotted: model.plotted,
-                          window: model.window,
-                          hot: model.throttleActive)
+                          window: model.window)
                     .frame(minHeight: 140)
 
                 // chips: line color + live RPM
@@ -1630,8 +1732,7 @@ struct ContentView: View {
 
                 RPMGraph(samples: model.samples,
                          fans: model.fans,
-                         window: model.window,
-                         hot: model.throttleActive)
+                         window: model.window)
                     .frame(height: 100)
 
                 // --- Power / Frequency / Utilization, Power Gadget-style ---
@@ -1644,30 +1745,30 @@ struct ContentView: View {
                             MetricLine(label: "DRAM", color: .orange,
                                        value: { $0.power["DRAM"] }),
                           ],
-                          samples: model.samples, window: model.window,
-                          hot: model.throttleActive)
+                          samples: model.samples, window: model.window)
                     .frame(height: 116)
                 if model.hasFreq {
                     MiniGraph(title: L("Frequency"), unit: "GHz",
                               lines: [MetricLine(label: "CORE", color: .purple,
                                                  value: { $0.freqGHz })],
                               samples: model.samples, window: model.window,
-                              fixedMax: 5, hot: model.throttleActive)
+                              fixedMax: 5)
                         .frame(height: 116)
                 }
                 MiniGraph(title: L("Utilization"), unit: "%",
                           lines: utilLines,
                           samples: model.samples, window: model.window,
                           fixedMax: 100,
-                          perCoreToggle: $model.utilPerCore,
-                          hot: model.throttleActive)
+                          perCoreToggle: $model.utilPerCore)
                     .frame(height: 116)
 
                 TimeAxis(samples: model.samples, window: model.window)
                     .frame(height: 14)
                 }
+                .overlay(ThrottleBands(spans: model.throttleSpans,
+                                       samples: model.samples,
+                                       window: model.window))
                 .overlay(StackXGrid(samples: model.samples, window: model.window))
-                .animation(.easeInOut(duration: 0.6), value: model.throttleActive)
             }
             .frame(minWidth: 480)
 
@@ -1873,7 +1974,7 @@ struct SMCFanApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     var body: some Scene {
-        WindowGroup("Mac Fanatic  (\(Model.shared.hwModel))") {
+        WindowGroup("Mac Fanatic \(appVersionString)  (\(Model.shared.hwModel))") {
             ContentView()
         }
     }

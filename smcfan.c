@@ -17,6 +17,10 @@
 #include <stdint.h>
 #include <IOKit/IOKitLib.h>
 
+#ifndef SMCFAN_VERSION
+#define SMCFAN_VERSION "dev"
+#endif
+
 #define KERNEL_INDEX_SMC      2
 #define SMC_CMD_READ_BYTES    5
 #define SMC_CMD_WRITE_BYTES   6
@@ -300,6 +304,7 @@ static void cmd_status(void)
 static void usage(const char *argv0)
 {
     fprintf(stderr,
+        "smcfan " SMCFAN_VERSION "\n"
         "Usage:\n"
         "  %s status              — fan speeds, limits, temperatures\n"
         "  %s set <fan> <rpm>     — manual mode, set RPM (sudo)\n"

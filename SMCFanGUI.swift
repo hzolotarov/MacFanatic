@@ -355,6 +355,15 @@ final class PowerGadget {
         return r
     }
 
+    /// Drop the pending sample and take a fresh anchor — used after
+    /// sleep/wake, where an interval spanning the sleep gap is garbage.
+    func reanchor() {
+        if prev != 0 { _ = releaseFn?(prev) }
+        prev = 0
+        _ = readSampleFn?(0, &prev)
+        emptyReads = 0
+    }
+
     private func noteEmptyRead() {
         emptyReads += 1
         guard emptyReads >= 3 else { return }
@@ -533,6 +542,13 @@ final class Model: ObservableObject {
     func poll() {
         guard let smc = smc else { return }
 
+        // Sleep/wake gap: timers don't fire during sleep, every delta across
+        // the gap is garbage, and an open throttle span would smear over it.
+        if let lastSeen = samples.last?.time,
+           Date().timeIntervalSince(lastSeen) > 10 {
+            neutralizeGap(lastSeen: lastSeen)
+        }
+
         let count = Int(smc.readDouble("FNum") ?? 0)
         var newFans: [FanState] = []
         for i in 0..<count {
@@ -638,6 +654,23 @@ final class Model: ObservableObject {
         }
 
         statusHandler?(String(format: "%.0f°", cpu), tip)
+    }
+
+    /// After a sleep/wake (or any long suspension): close an open throttle
+    /// span at the last pre-gap moment and reset every interval-based state,
+    /// so nothing computes a delta across the hole.
+    private func neutralizeGap(lastSeen: Date) {
+        if let i = throttleSpans.indices.last, throttleSpans[i].end == nil {
+            throttleSpans[i].end = lastSeen
+        }
+        if throttleActive { throttleActive = false }  // span already closed above
+        derivState = [:]
+        commanded = [:]
+        prevTicks = []
+        lastLoop = nil
+        helperFreq = nil
+        freqMissCount = 0
+        powerGadget?.reanchor()
     }
 
     /// Throttle detector: frequency below the threshold while the CPU is busy.
@@ -1353,17 +1386,26 @@ struct RPMGraph: View {
     let window: TimeInterval
     var hot: Bool = false
 
-    private func linePoints(fan: Int, pts: [Sample], start: Date, span: TimeInterval,
-                            lo: Double, range: Double, size: CGSize) -> [CGPoint] {
-        var out: [CGPoint] = []
-        out.reserveCapacity(pts.count)
+    /// Points grouped into segments; a new segment starts after a sleep gap
+    /// so the graph never bridges the hole with a straight line.
+    private func lineSegments(fan: Int, pts: [Sample], start: Date, span: TimeInterval,
+                              lo: Double, range: Double, size: CGSize) -> [[CGPoint]] {
+        var segs: [[CGPoint]] = []
+        var cur: [CGPoint] = []
+        var lastTime: Date? = nil
         for sm in pts {
             guard let v = sm.fanRPM[fan] else { continue }
+            if let lt = lastTime, sm.time.timeIntervalSince(lt) > 10, !cur.isEmpty {
+                segs.append(cur)
+                cur = []
+            }
+            lastTime = sm.time
             let x = 42 + CGFloat(sm.time.timeIntervalSince(start) / span) * (size.width - 42)
             let y = size.height * CGFloat(1 - (v - lo) / range)
-            out.append(CGPoint(x: x, y: y))
+            cur.append(CGPoint(x: x, y: y))
         }
-        return out
+        if !cur.isEmpty { segs.append(cur) }
+        return segs
     }
 
     var body: some View {
@@ -1394,8 +1436,10 @@ struct RPMGraph: View {
                         .position(x: 20, y: min(max(y, 7), geo.size.height - 7))
                 }
                 ForEach(fans) { f in
-                    let line = linePoints(fan: f.id, pts: pts, start: start, span: span,
-                                          lo: lo, range: range, size: geo.size)
+                    let segs = lineSegments(fan: f.id, pts: pts, start: start, span: span,
+                                            lo: lo, range: range, size: geo.size)
+                    ForEach(segs.indices, id: \.self) { si in
+                    let line = segs[si]
                     if line.count > 1 {
                         // gradient fill under the curve
                         Path { p in
@@ -1417,6 +1461,7 @@ struct RPMGraph: View {
                         .stroke(fanColor(f.id),
                                 style: StrokeStyle(lineWidth: 1.8,
                                                    lineCap: .round, lineJoin: .round))
+                    }
                     }
                 }
             }
@@ -1464,8 +1509,13 @@ struct TempGraph: View {
                 ForEach(sensors.filter { plotted.contains($0.key) }) { s in
                     Path { p in
                         var started = false
+                        var lastTime: Date? = nil
                         for sm in pts {
                             guard let v = sm.values[s.key] else { continue }
+                            // don't bridge sleep gaps with a straight line
+                            if let lt = lastTime,
+                               sm.time.timeIntervalSince(lt) > 10 { started = false }
+                            lastTime = sm.time
                             let x = 42 + CGFloat(sm.time.timeIntervalSince(start) / span)
                                        * (geo.size.width - 42)
                             let y = geo.size.height * CGFloat(1 - (v - lo) / range)
@@ -1565,8 +1615,12 @@ struct MiniGraph: View {
                     ForEach(lines.indices, id: \.self) { i in
                         Path { p in
                             var started = false
+                            var lastTime: Date? = nil
                             for sm in pts {
                                 guard let v = lines[i].value(sm) else { continue }
+                                if let lt = lastTime,
+                                   sm.time.timeIntervalSince(lt) > 10 { started = false }
+                                lastTime = sm.time
                                 let x = 42 + CGFloat(sm.time.timeIntervalSince(start) / span)
                                            * (geo.size.width - 42)
                                 let y = geo.size.height * CGFloat(1 - min(v, hi) / hi)

@@ -585,10 +585,12 @@ final class Model: ObservableObject {
             if let v = r.dramW { power["DRAM"] = v }
             freq = r.freqGHz
         }
-        // Frequency fallback: no Power Gadget data → Apple's powermetrics via
-        // the setuid helper (it computes APERF/MPERF-based effective frequency).
-        // Async with a one-poll lag: use the last fetched value, kick a new fetch.
-        if freq == nil, helperOK {
+        // Frequency fallback: ONLY when Power Gadget is considered dead
+        // (hasFreq == false), never on a transient empty read — powermetrics
+        // and PG average differently (a light-load powermetrics sample can
+        // legitimately read ~1.2 GHz), and mixing sources per-sample produced
+        // phantom throttle detections.
+        if freq == nil, !hasFreq, helperOK {
             freq = helperFreq
             fetchFreqViaHelper()
         }
@@ -682,17 +684,46 @@ final class Model: ObservableObject {
     /// at idle, and max airflow is exactly what cures it.
     /// On genuine idle the frequency pops above the threshold on the first
     /// background burst (turbo spikes), so the guard releases on its own.
+    private var throttleBelowCount = 0   // consecutive below-threshold samples
+
     private func updateThrottleState(freq: Double?, util: Double?) {
-        guard throttleGuard, let f = freq else {
+        guard throttleGuard else {
             throttleActive = false
+            throttleBelowCount = 0
             return
         }
+        // missing data (a PG hiccup) holds the current state instead of
+        // resetting it — a one-sample hole must not open or close episodes
+        guard let f = freq else { return }
         if throttleActive {
             if f > throttleGHz + 0.4 {
                 throttleActive = false
+                throttleBelowCount = 0
+                restoreAfterThrottle()
             }
         } else if f < throttleGHz && (util ?? 0) > 15 {
-            throttleActive = true
+            throttleBelowCount += 1
+            if throttleBelowCount >= 2 {   // debounce: one odd sample is noise
+                throttleActive = true
+            }
+        } else {
+            throttleBelowCount = 0
+        }
+    }
+
+    /// After the guard releases: hand every fan back to its own rule.
+    private func restoreAfterThrottle() {
+        for fan in fans {
+            switch rules[fan.id] ?? .auto {
+            case .auto:
+                _ = setAutoQuiet(fan: fan.id)
+            case .constant(let r):
+                _ = setRPMQuiet(fan: fan.id, rpm: r)
+            case .sensor:
+                break   // control loop takes over on the next pass
+            }
+            commanded[fan.id] = nil
+            derivState[fan.id] = nil
         }
     }
 
@@ -702,6 +733,20 @@ final class Model: ObservableObject {
         let now = Date()
         let loopDT = lastLoop.map { now.timeIntervalSince($0) } ?? 2.0
         lastLoop = now
+
+        // Throttle guard overrides EVERYTHING: every fan to max, whatever
+        // its rule — an emergency is not the time to respect preferences.
+        if throttleActive {
+            for fan in fans {
+                let cur = commanded[fan.id] ?? fan.rpm
+                if abs(fan.maxRPM - cur) >= 50 || commanded[fan.id] == nil {
+                    if setRPMQuiet(fan: fan.id, rpm: fan.maxRPM) {
+                        commanded[fan.id] = fan.maxRPM
+                    }
+                }
+            }
+            return
+        }
 
         for fan in fans {
             guard case let .sensor(key, from, to) = rules[fan.id] ?? .auto,
@@ -731,9 +776,6 @@ final class Model: ObservableObject {
                 derivState[fan.id] = (t, now, 0)
             }
             if ema > 0 { target += ema * boostPerDeg }
-            // Throttle guard: temperature lies here (core is cold, VRM burns) —
-            // ignore it and blow at full speed until frequency recovers.
-            if throttleActive { target = fan.maxRPM }
             target = min(max(target, fan.minRPM), fan.maxRPM)
 
             // attack/decay asymmetry
@@ -937,6 +979,19 @@ final class Model: ObservableObject {
             return false
         }
         return true
+    }
+
+    /// Silent per-fan auto — for guard release.
+    @discardableResult
+    private func setAutoQuiet(fan: Int) -> Bool {
+        guard let path = cliPath else { return false }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = ["auto", "\(fan)"]
+        p.standardOutput = Pipe(); p.standardError = Pipe()
+        do { try p.run() } catch { return false }
+        p.waitUntilExit()
+        return p.terminationStatus == 0
     }
 
     /// As runCLI(set...) but silent — for the control loop.

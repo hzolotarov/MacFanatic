@@ -1,5 +1,68 @@
 # Changelog
 
+## 1.0.1
+
+### Added
+- **Throttle history bands**: every throttle episode is recorded and drawn
+  as a pink band across all graphs, from onset to recovery — a lasting
+  visual record instead of a momentary alarm. Bands survive as long as the
+  sample history covers them and scroll away with it.
+- **Shared X axis**: clock-aligned vertical gridlines running continuously
+  through the whole graph stack, plus a time strip (HH:mm) at the bottom.
+  Tick step adapts to the window (15 s at 1 min … 30 min at 2 h).
+- **Persistence**: the set of sensors plotted on the temperature graph and
+  the last non-auto rule per fan now survive restarts. Switching a fan to
+  Auto no longer wipes its custom setup — the editor restores it.
+- **Single-source versioning**: a `VERSION` file injected by `make` into
+  Info.plist, the CLI binary (`-DSMCFAN_VERSION`), the window title, the
+  README badge, and the DMG volume name. `make bump V=x.y.z`.
+- **`smcfan freq`**: average CPU frequency in MHz via Apple's
+  `powermetrics` through the setuid helper — real APERF/MPERF-based
+  frequency with no Intel Power Gadget installed. The throttle guard works
+  either way; only the DRAM power line still requires Power Gadget.
+- **Icon pipeline**: `make icon` builds AppIcon.icns from `icon.png`
+  (auto-invoked by `make app` when the PNG is present).
+- **`make dmg`**: distributable image with the drag-to-Applications layout.
+- Sensor table sortable by temperature (click the column headers).
+
+### Changed
+- **Throttle guard drives every fan** while active — auto, constant, and
+  sensor-based alike — and restores each fan's own rule on release.
+  Previously only sensor-based rules were overridden.
+- Guard entry threshold for "CPU busy" lowered from 40% to 15%:
+  GPU-heavy renders throttle the CPU while keeping its utilization modest.
+- Guard entry debounced to 2 consecutive below-threshold samples.
+- Menu bar shows a template fan icon + temperature only; RPM, per-fan
+  modes, and reaction settings moved to the hover tooltip. The icon turns
+  red while the guard is active.
+- Frequency graph shows/hides itself based on actual data availability
+  rather than "framework loaded".
+
+### Fixed
+- **Phantom throttle detections**: the powermetrics frequency fallback no
+  longer kicks in on a transient Power Gadget hiccup — the two sources
+  average differently (a light-load powermetrics sample legitimately reads
+  ~1.2 GHz), and per-sample source mixing faked throttle episodes.
+  The fallback now engages only when Power Gadget is considered dead, and
+  missing data holds detector state instead of resetting it.
+- **Sleep/wake handling**: a gap detector resets all interval-based state
+  (derivative EMA, commanded RPM, CPU ticks, PG sample anchor), closes an
+  open throttle span at the last pre-sleep moment instead of smearing a
+  giant pink band across the nap, and all graphs break their lines at gaps
+  instead of bridging them.
+- **Stale Power Gadget sessions self-heal**: a session yielding empty
+  samples (framework alive, data dead — happens when the PG app has never
+  run) is shut down and re-initialized in place after 3 empty reads.
+- SMC power fallback probes a list of candidate keys per model
+  (PCPT/PSTR/PCTR/PDTR, PCPC/PC0C/PC0R) instead of assuming two.
+
+### Notes
+- Intel Power Gadget's background agent is known to hold a
+  `PreventUserIdleSystemSleep` power assertion indefinitely (observed:
+  209+ hours), keeping the machine from ever sleeping. With the setuid
+  helper installed you can uninstall Power Gadget entirely and lose only
+  the DRAM power line.
+
 ## 1.0.0 — initial release
 
 Born in one very long day as "write me a Macs Fan Control analog";

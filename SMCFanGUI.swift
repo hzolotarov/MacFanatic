@@ -233,6 +233,14 @@ struct ThrottleSpan: Equatable {
     var end: Date?          // nil = still throttling
 }
 
+struct ProcSample: Identifiable, Equatable {
+    var id: Int { pid }
+    let pid: Int
+    let name: String
+    let cpuPct: Double        // 100% = one full core, Activity Monitor style
+    let energy: Double?       // Apple's unitless Energy Impact
+}
+
 struct Sample {
     let time: Date
     let values: [String: Double]     // temperatures: SMC key → °C
@@ -450,6 +458,14 @@ final class Model: ObservableObject {
         didSet { UserDefaults.standard.set(utilPerCore, forKey: "utilPerCore") }
     }
     @Published var hasFreq: Bool = false
+    @Published var procs: [ProcSample] = []
+    @Published var showProcesses: Bool = UserDefaults.standard.bool(forKey: "showProcesses") {
+        didSet { UserDefaults.standard.set(showProcesses, forKey: "showProcesses") }
+    }
+    @Published var procSortByEnergy: Bool = UserDefaults.standard.bool(forKey: "procSortByEnergy") {
+        didSet { UserDefaults.standard.set(procSortByEnergy, forKey: "procSortByEnergy") }
+    }
+    private var procsInFlight = false
 
     var statusHandler: ((_ title: String, _ tooltip: String) -> Void)?
     var hwModel: String = ""
@@ -624,6 +640,8 @@ final class Model: ObservableObject {
 
         updateThrottleState(freq: freq, util: utilTotal)
         runControlLoop()
+
+        if showProcesses { fetchTasks() }
 
         // menu bar: temperature only in the title; everything else in a hover hint
         let coreTemps = newSensors.filter { $0.name.hasPrefix("CPU Core") }.map { $0.value }
@@ -1034,6 +1052,43 @@ final class Model: ObservableObject {
             DispatchQueue.main.async {
                 self?.helperFreq = ghz
                 self?.helperFreqInFlight = false
+            }
+        }
+    }
+
+    /// Per-process CPU/Energy via `smcfan-cli tasks` (powermetrics plist).
+    /// Async, one in flight; a sample takes ~0.6 s off the main thread.
+    private func fetchTasks() {
+        guard !procsInFlight, helperOK, let path = cliPath else { return }
+        procsInFlight = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            var out: [ProcSample] = []
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: path)
+            p.arguments = ["tasks"]
+            let pipe = Pipe()
+            p.standardOutput = pipe
+            p.standardError = Pipe()
+            if (try? p.run()) != nil {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                p.waitUntilExit()
+                if let dict = (try? PropertyListSerialization.propertyList(
+                                    from: data, options: [], format: nil)) as? [String: Any],
+                   let tasks = dict["tasks"] as? [[String: Any]] {
+                    for t in tasks {
+                        guard let name = t["name"] as? String,
+                              let pid = (t["pid"] as? NSNumber)?.intValue else { continue }
+                        let cpuMs = (t["cputime_ms_per_s"] as? NSNumber)?.doubleValue
+                                 ?? (t["cpu_ms_per_s"] as? NSNumber)?.doubleValue ?? 0
+                        let energy = (t["energy_impact"] as? NSNumber)?.doubleValue
+                        out.append(ProcSample(pid: pid, name: name,
+                                              cpuPct: cpuMs / 10.0, energy: energy))
+                    }
+                }
+            }
+            DispatchQueue.main.async {
+                if !out.isEmpty { self?.procs = out }
+                self?.procsInFlight = false
             }
         }
     }
@@ -1750,6 +1805,70 @@ struct ReactionEditor: View {
     }
 }
 
+// MARK: - Process table (powermetrics tasks)
+
+struct ProcessTable: View {
+    @ObservedObject var model: Model
+
+    private var sorted: [ProcSample] {
+        let base = model.procs
+        let s = model.procSortByEnergy
+            ? base.sorted { ($0.energy ?? 0) > ($1.energy ?? 0) }
+            : base.sorted { $0.cpuPct > $1.cpuPct }
+        return Array(s.prefix(20))
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L("Process")).font(.caption).foregroundColor(.secondary)
+                Spacer()
+                Button(action: { model.procSortByEnergy = false }) {
+                    Text((model.procSortByEnergy ? "" : "▼ ") + "CPU %")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                .buttonStyle(PlainButtonStyle())
+                Button(action: { model.procSortByEnergy = true }) {
+                    Text((model.procSortByEnergy ? "▼ " : "") + L("Energy"))
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            Divider()
+            if sorted.isEmpty {
+                Text(L("Collecting data…"))
+                    .font(.caption).foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(sorted.enumerated()), id: \.element.pid) { idx, t in
+                            HStack(spacing: 6) {
+                                Text(t.name)
+                                    .font(.system(size: 11))
+                                    .lineLimit(1).truncationMode(.tail)
+                                Spacer()
+                                Text(String(format: "%.1f", t.cpuPct))
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .frame(width: 44, alignment: .trailing)
+                                Text(t.energy.map { String(format: "%.1f", $0) } ?? "—")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 48, alignment: .trailing)
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 2)
+                            .background(idx % 2 == 1 ? Color.primary.opacity(0.03)
+                                                     : Color.clear)
+                        }
+                    }
+                }
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.03)))
+    }
+}
+
 // MARK: - Main window
 
 struct ContentView: View {
@@ -1881,8 +2000,16 @@ struct ContentView: View {
             }
             .frame(minWidth: 480)
 
-            SensorTable(model: model)
-                .frame(width: 280)
+            VStack(spacing: 8) {
+                SensorTable(model: model)
+                Toggle(L("Show processes"), isOn: $model.showProcesses)
+                    .font(.caption)
+                if model.showProcesses {
+                    ProcessTable(model: model)
+                        .frame(height: 260)
+                }
+            }
+            .frame(width: 280)
         }
         .padding(12)
         .frame(minWidth: 820, minHeight: 840)

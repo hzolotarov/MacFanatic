@@ -311,8 +311,9 @@ static void usage(const char *argv0)
         "  %s max [fan]           — fan(s) to maximum (sudo)\n"
         "  %s auto [fan]          — back to SMC automatics, all or one (sudo)\n"
         "  %s freq                — average CPU frequency, MHz (needs setuid helper)\n"
+        "  %s tasks               — per-process CPU/energy plist (needs setuid helper)\n"
         "  %s watch [sec]         — status in a loop (default 2 s)\n",
-        argv0, argv0, argv0, argv0, argv0, argv0);
+        argv0, argv0, argv0, argv0, argv0, argv0, argv0);
 }
 
 int main(int argc, char **argv)
@@ -371,6 +372,28 @@ int main(int argc, char **argv)
             if (fan_set_mode(i, 0) != 0) rc = 1;
         if (rc) fprintf(stderr, "Write failed. Running under sudo?\n");
         else printf("Fan(s) returned to automatic mode.\n");
+
+    } else if (strcmp(argv[1], "tasks") == 0) {
+        /* Per-process CPU and Energy Impact via powermetrics' tasks sampler.
+         * Raw plist goes to stdout; the GUI parses it (structured beats
+         * scraping a whitespace-aligned table). Needs root — we're setuid. */
+        if (setuid(0) != 0) {
+            fprintf(stderr, "tasks needs the setuid helper (make helper)\n");
+            smc_close();
+            return 1;
+        }
+        FILE *pm = popen("/usr/bin/powermetrics -n 1 -i 500 -f plist "
+                         "--samplers tasks --show-process-energy 2>/dev/null", "r");
+        if (!pm) {
+            fprintf(stderr, "failed to run powermetrics\n");
+            smc_close();
+            return 1;
+        }
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof buf, pm)) > 0)
+            fwrite(buf, 1, n, stdout);
+        pclose(pm);
 
     } else if (strcmp(argv[1], "freq") == 0) {
         /* Average CPU frequency in MHz via Apple's powermetrics (needs root —

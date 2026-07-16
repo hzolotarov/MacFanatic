@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Process list**: per-process CPU % and Apple's Energy Impact via
+  `powermetrics --samplers tasks` (plist) through the setuid helper.
+  Panel under the sensor table, top 20, sortable by either column,
+  toggleable and persisted; sampling runs only while the panel is shown.
+  New CLI command: `smcfan tasks`.
+
 ## 1.0.1
 
 ### Added

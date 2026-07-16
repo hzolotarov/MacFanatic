@@ -71,3 +71,8 @@
 /* Menu bar */
 "Show window" = "Показать окно";
 "Quit" = "Выход";
+
+/* Processes */
+"Process" = "Процесс";
+"Energy" = "Энергия";
+"Show processes" = "Показывать процессы";

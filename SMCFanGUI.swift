@@ -462,10 +462,21 @@ final class Model: ObservableObject {
     @Published var showProcesses: Bool = UserDefaults.standard.bool(forKey: "showProcesses") {
         didSet { UserDefaults.standard.set(showProcesses, forKey: "showProcesses") }
     }
-    @Published var procSortByEnergy: Bool = UserDefaults.standard.bool(forKey: "procSortByEnergy") {
-        didSet { UserDefaults.standard.set(procSortByEnergy, forKey: "procSortByEnergy") }
+    enum ProcSort: String { case cpu, energy, total }
+    @Published var procSort: ProcSort =
+        ProcSort(rawValue: UserDefaults.standard.string(forKey: "procSort") ?? "cpu") ?? .cpu {
+        didSet { UserDefaults.standard.set(procSort.rawValue, forKey: "procSort") }
     }
+    // Cumulative Energy Impact per process NAME (pids die and respawn),
+    // integrated over wall time since launch / last reset. Session-scoped.
+    @Published var procTotals: [String: Double] = [:]
+    private var lastTasksAt: Date?
     private var procsInFlight = false
+
+    func resetProcTotals() {
+        procTotals = [:]
+        lastTasksAt = nil
+    }
 
     var statusHandler: ((_ title: String, _ tooltip: String) -> Void)?
     var hwModel: String = ""
@@ -1087,8 +1098,24 @@ final class Model: ObservableObject {
                 }
             }
             DispatchQueue.main.async {
-                if !out.isEmpty { self?.procs = out }
-                self?.procsInFlight = false
+                guard let self = self else { return }
+                if !out.isEmpty {
+                    self.procs = out
+                    let now = Date()
+                    // integrate impact × dt; skip sleep gaps and stalls
+                    if let last = self.lastTasksAt {
+                        let dt = now.timeIntervalSince(last)
+                        if dt > 0, dt < 30 {
+                            for t in out {
+                                if let e = t.energy, e > 0 {
+                                    self.procTotals[t.name, default: 0] += e * dt
+                                }
+                            }
+                        }
+                    }
+                    self.lastTasksAt = now
+                }
+                self.procsInFlight = false
             }
         }
     }
@@ -1810,52 +1837,90 @@ struct ReactionEditor: View {
 struct ProcessTable: View {
     @ObservedObject var model: Model
 
-    private var sorted: [ProcSample] {
-        let base = model.procs
-        let s = model.procSortByEnergy
-            ? base.sorted { ($0.energy ?? 0) > ($1.energy ?? 0) }
-            : base.sorted { $0.cpuPct > $1.cpuPct }
-        return Array(s.prefix(20))
+    private struct Row: Identifiable {
+        var id: String { name }
+        let name: String
+        let cpuPct: Double?     // nil = not currently running
+        let energy: Double?
+        let total: Double
+    }
+
+    private var rows: [Row] {
+        // aggregate current samples by name (helper swarms, dead pids)
+        var cur: [String: (cpu: Double, energy: Double?)] = [:]
+        for p in model.procs {
+            var e = cur[p.name] ?? (0, nil)
+            e.cpu += p.cpuPct
+            if let en = p.energy { e.energy = (e.energy ?? 0) + en }
+            cur[p.name] = e
+        }
+        var names = Set(cur.keys)
+        if model.procSort == .total { names.formUnion(model.procTotals.keys) }
+        var out: [Row] = names.map { n in
+            Row(name: n, cpuPct: cur[n]?.cpu, energy: cur[n]?.energy,
+                total: model.procTotals[n] ?? 0)
+        }
+        switch model.procSort {
+        case .cpu:    out.sort { ($0.cpuPct ?? -1) > ($1.cpuPct ?? -1) }
+        case .energy: out.sort { ($0.energy ?? -1) > ($1.energy ?? -1) }
+        case .total:  out.sort { $0.total > $1.total }
+        }
+        return Array(out.prefix(20))
+    }
+
+    private func fmtTotal(_ v: Double) -> String {
+        v >= 10000 ? String(format: "%.1fk", v / 1000) : String(format: "%.0f", v)
+    }
+
+    private func sortButton(_ label: String, _ mode: Model.ProcSort) -> some View {
+        Button(action: { model.procSort = mode }) {
+            Text((model.procSort == mode ? "▼ " : "") + label)
+                .font(.caption).foregroundColor(.secondary)
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 8) {
                 Text(L("Process")).font(.caption).foregroundColor(.secondary)
+                Button(action: { model.resetProcTotals() }) {
+                    Text("↺").font(.caption).foregroundColor(.secondary)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help(L("Reset accumulated energy"))
                 Spacer()
-                Button(action: { model.procSortByEnergy = false }) {
-                    Text((model.procSortByEnergy ? "" : "▼ ") + "CPU %")
-                        .font(.caption).foregroundColor(.secondary)
-                }
-                .buttonStyle(PlainButtonStyle())
-                Button(action: { model.procSortByEnergy = true }) {
-                    Text((model.procSortByEnergy ? "▼ " : "") + L("Energy"))
-                        .font(.caption).foregroundColor(.secondary)
-                }
-                .buttonStyle(PlainButtonStyle())
+                sortButton("CPU %", .cpu)
+                sortButton(L("Energy"), .energy)
+                sortButton("Σ", .total)
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
             Divider()
-            if sorted.isEmpty {
+            if rows.isEmpty {
                 Text(L("Collecting data…"))
                     .font(.caption).foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(Array(sorted.enumerated()), id: \.element.pid) { idx, t in
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { idx, t in
                             HStack(spacing: 6) {
                                 Text(t.name)
                                     .font(.system(size: 11))
                                     .lineLimit(1).truncationMode(.tail)
+                                    .foregroundColor(t.cpuPct == nil ? .secondary : .primary)
                                 Spacer()
-                                Text(String(format: "%.1f", t.cpuPct))
+                                Text(t.cpuPct.map { String(format: "%.1f", $0) } ?? "—")
                                     .font(.system(size: 11, design: .monospaced))
-                                    .frame(width: 44, alignment: .trailing)
+                                    .frame(width: 40, alignment: .trailing)
                                 Text(t.energy.map { String(format: "%.1f", $0) } ?? "—")
                                     .font(.system(size: 11, design: .monospaced))
                                     .foregroundColor(.secondary)
-                                    .frame(width: 48, alignment: .trailing)
+                                    .frame(width: 42, alignment: .trailing)
+                                Text(fmtTotal(t.total))
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 46, alignment: .trailing)
                             }
                             .padding(.horizontal, 10).padding(.vertical, 2)
                             .background(idx % 2 == 1 ? Color.primary.opacity(0.03)

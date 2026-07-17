@@ -8,6 +8,10 @@
   Panel under the sensor table, top 20, sortable by either column,
   toggleable and persisted; sampling runs only while the panel is shown.
   New CLI command: `smcfan tasks`.
+- **Cumulative Energy Impact** (Σ column): impact integrated over wall
+  time per process name since launch/reset — surfaces the quiet
+  always-on hogs that never top an instantaneous list. Third sort mode,
+  reset button, sleep gaps excluded from integration.
 
 ## 1.0.1
 

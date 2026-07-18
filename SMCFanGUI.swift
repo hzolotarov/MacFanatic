@@ -904,6 +904,21 @@ final class Model: ObservableObject {
 
     /// Full Blast: every fan to max (a constant rule at maxRPM, so the speed
     /// survives polling and shows up in the "Custom…" buttons).
+    /// Counterpart to "All fans to auto": re-apply each fan's remembered
+    /// last custom rule (constant or sensor-based). Fans that were never
+    /// customized stay as they are.
+    func allToCustom() {
+        for fan in fans {
+            if let r = lastCustom[fan.id] {
+                apply(rule: r, to: fan.id)
+            }
+        }
+    }
+
+    var hasAnyCustomMemory: Bool {
+        fans.contains { lastCustom[$0.id] != nil }
+    }
+
     func fullBlast() {
         for f in fans {
             rules[f.id] = .constant(f.maxRPM)
@@ -1983,6 +1998,9 @@ struct ContentView: View {
 
                 HStack {
                     Button(L("All fans to auto")) { model.allAuto() }
+                    Button(L("All to custom")) { model.allToCustom() }
+                        .disabled(!model.hasAnyCustomMemory)
+                        .help(L("Re-apply each fan's last custom rule"))
                     Button(L("Full Blast")) { model.fullBlast() }
                     Button(L("Reaction…")) { showReaction = true }
                         .popover(isPresented: $showReaction, arrowEdge: .bottom) {

@@ -12,6 +12,9 @@
   time per process name since launch/reset — surfaces the quiet
   always-on hogs that never top an instantaneous list. Third sort mode,
   reset button, sleep gaps excluded from integration.
+- **"All to custom"** button: re-applies each fan's remembered last
+  custom rule — the counterpart to "All fans to auto". Disabled until at
+  least one fan has a remembered rule.
 - **Resizable splitter** between the graph column and the sensor/process
   column (drag the divider; right pane 240–480 px).
 
@@ -22,6 +25,9 @@
 - Process table polish: full process name on hover (truncation-proof),
   the active sort column is highlighted, and the CPU % header explains
   the 100%-per-core convention.
+- **"All to custom"** button: re-applies each fan's remembered last
+  custom rule — the counterpart to "All fans to auto". Disabled until at
+  least one fan has a remembered rule.
 - **Resizable splitter** between the graph stack and the side panels
   (sensors/processes) — drag to trade graph width for name width.
 

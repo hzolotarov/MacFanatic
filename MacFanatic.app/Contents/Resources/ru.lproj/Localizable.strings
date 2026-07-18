@@ -83,3 +83,5 @@
 "Accumulated since launch/reset" = "Накоплено с запуска/сброса";
 "(short-lived tasks)" = "(короткоживущие задачи)";
 "Processes that exited during the sample — powermetrics aggregates their final CPU/energy here. Spikes during builds and scripts." = "Процессы, завершившиеся за время замера — powermetrics складывает их финальные CPU/энергию сюда. Растёт при сборках и скриптах.";
+"All to custom" = "Всё в кастом";
+"Re-apply each fan's last custom rule" = "Вернуть каждому вентилятору его последнее кастомное правило";

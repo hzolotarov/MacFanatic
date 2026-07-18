@@ -12,6 +12,23 @@
   time per process name since launch/reset — surfaces the quiet
   always-on hogs that never top an instantaneous list. Third sort mode,
   reset button, sleep gaps excluded from integration.
+- **Resizable splitter** between the graph column and the sensor/process
+  column (drag the divider; right pane 240–480 px).
+
+### Changed
+- powermetrics' `DEAD_TASKS` aggregate is kept (short-lived processes
+  carry real energy during builds and scripts) but shown as a human
+  label, italic, with an explanatory tooltip.
+- Process table polish: full process name on hover (truncation-proof),
+  the active sort column is highlighted, and the CPU % header explains
+  the 100%-per-core convention.
+- **Resizable splitter** between the graph stack and the side panels
+  (sensors/processes) — drag to trade graph width for name width.
+
+### Changed
+- Panel polish: full process names in hover tooltips, the active sort
+  column highlighted in both tables, and a hint on the CPU % header
+  (100% = one core, Activity Monitor style).
 
 ## 1.0.1
 

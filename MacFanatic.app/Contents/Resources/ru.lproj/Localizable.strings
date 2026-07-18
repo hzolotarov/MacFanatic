@@ -77,3 +77,9 @@
 "Energy" = "Энергия";
 "Show processes" = "Показывать процессы";
 "Reset accumulated energy" = "Сбросить накопленную энергию";
+"100% = one core" = "100% = одно ядро";
+"100% = one full core, Activity Monitor style" = "100% = одно полное ядро, как в Мониторинге системы";
+"Instantaneous Energy Impact" = "Мгновенный Energy Impact";
+"Accumulated since launch/reset" = "Накоплено с запуска/сброса";
+"(short-lived tasks)" = "(короткоживущие задачи)";
+"Processes that exited during the sample — powermetrics aggregates their final CPU/energy here. Spikes during builds and scripts." = "Процессы, завершившиеся за время замера — powermetrics складывает их финальные CPU/энергию сюда. Растёт при сборках и скриптах.";

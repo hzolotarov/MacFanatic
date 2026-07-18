@@ -1455,14 +1455,16 @@ struct SensorTable: View {
             HStack {
                 Button(action: { model.sortByTemp = false }) {
                     Text(L("Sensor") + (model.sortByTemp ? "" : " ▼"))
-                        .font(.caption).foregroundColor(.secondary)
+                        .font(.caption.weight(model.sortByTemp ? .regular : .semibold))
+                        .foregroundColor(model.sortByTemp ? .secondary : .accentColor)
                 }
                 .buttonStyle(PlainButtonStyle())
                 .help(L("Sort by name"))
                 Spacer()
                 Button(action: { model.sortByTemp = true }) {
                     Text((model.sortByTemp ? "▼ " : "") + "°C")
-                        .font(.caption).foregroundColor(.secondary)
+                        .font(.caption.weight(model.sortByTemp ? .semibold : .regular))
+                        .foregroundColor(model.sortByTemp ? .accentColor : .secondary)
                 }
                 .buttonStyle(PlainButtonStyle())
                 .help(L("Sort by temperature"))
@@ -1873,9 +1875,11 @@ struct ProcessTable: View {
     }
 
     private func sortButton(_ label: String, _ mode: Model.ProcSort) -> some View {
-        Button(action: { model.procSort = mode }) {
-            Text((model.procSort == mode ? "▼ " : "") + label)
-                .font(.caption).foregroundColor(.secondary)
+        let active = model.procSort == mode
+        return Button(action: { model.procSort = mode }) {
+            Text((active ? "▼ " : "") + label)
+                .font(.caption.weight(active ? .semibold : .regular))
+                .foregroundColor(active ? .accentColor : .secondary)
         }
         .buttonStyle(PlainButtonStyle())
     }
@@ -1891,8 +1895,11 @@ struct ProcessTable: View {
                 .help(L("Reset accumulated energy"))
                 Spacer()
                 sortButton("CPU %", .cpu)
+                    .help(L("100% = one full core, Activity Monitor style"))
                 sortButton(L("Energy"), .energy)
+                    .help(L("Instantaneous Energy Impact"))
                 sortButton("Σ", .total)
+                    .help(L("Accumulated since launch/reset"))
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
             Divider()
@@ -1905,10 +1912,16 @@ struct ProcessTable: View {
                     LazyVStack(spacing: 0) {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { idx, t in
                             HStack(spacing: 6) {
-                                Text(t.name)
-                                    .font(.system(size: 11))
+                                Text(t.name == "DEAD_TASKS"
+                                     ? L("(short-lived tasks)") : t.name)
+                                    .font(t.name == "DEAD_TASKS"
+                                          ? Font.system(size: 11).italic()
+                                          : Font.system(size: 11))
                                     .lineLimit(1).truncationMode(.tail)
                                     .foregroundColor(t.cpuPct == nil ? .secondary : .primary)
+                                    .help(t.name == "DEAD_TASKS"
+                                          ? L("Processes that exited during the sample — powermetrics aggregates their final CPU/energy here. Spikes during builds and scripts.")
+                                          : t.name)
                                 Spacer()
                                 Text(t.cpuPct.map { String(format: "%.1f", $0) } ?? "—")
                                     .font(.system(size: 11, design: .monospaced))
@@ -1961,7 +1974,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HSplitView {
 
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(model.fans) { fan in
@@ -2063,7 +2076,8 @@ struct ContentView: View {
                                        window: model.window))
                 .overlay(StackXGrid(samples: model.samples, window: model.window))
             }
-            .frame(minWidth: 480)
+            .frame(minWidth: 480, maxWidth: .infinity)
+            .padding(.trailing, 8)
 
             VStack(spacing: 8) {
                 SensorTable(model: model)
@@ -2074,7 +2088,8 @@ struct ContentView: View {
                         .frame(height: 260)
                 }
             }
-            .frame(width: 280)
+            .frame(minWidth: 230, idealWidth: 280, maxWidth: 460)
+            .padding(.leading, 8)
         }
         .padding(12)
         .frame(minWidth: 820, minHeight: 840)
